@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: pnad01/frontend-video:v7
+          image: pnad01/frontend-video:v11
           ports:
             - containerPort: 80
 ---

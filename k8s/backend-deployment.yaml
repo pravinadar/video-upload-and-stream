@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: pnad01/backend-video:v7
+          image: pnad01/backend-video:v8
           ports:
             - containerPort: 4000
           envFrom:
