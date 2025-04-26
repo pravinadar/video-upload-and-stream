@@ -1,7 +1,13 @@
-# Ignore environment files
+# Ignore all .env files
 .env
-.env.*
+*.env
 
-# Ignore node_modules folders anywhere
+# But don't ignore .env.sample
+!.env.sample
+
+# Ignore node_modules anywhere
 node_modules/
-**/node_modules/
+
+# Ignore videos.json anywhere
+videos.json
+**/videos.json
