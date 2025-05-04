@@ -1,417 +1,72 @@
-# Video Management Application
+## Project Overview
 
-This project is a video management application that consists of a **frontend** and a **backend**. The application was initially developed to run on `localhost` and later configured for deployment on a local Kubernetes cluster using `minikube`. Below, you will find a detailed explanation of the project structure, the backend and frontend logic, and the steps to deploy the application locally and on Kubernetes.
+This video processing application is a basic project which provides a streamlined solution for uploading, transcoding, and streaming videos in a cloud-connected environment.
+
+## It offers the following key features:
+
+**Core Functionality**
+- **Video Upload**: Users can upload video files through an intuitive web interface
+- **Automatic Transcoding**: Videos are processed into multiple resolutions using FFmpeg
+- **Streaming**: Processed videos are available for viewing in various qualities
+- **Cloud Storage**: All video content is securely stored in Azure Blob Storage
+
+**Technical Architecture**
+- **Frontend**: React-based user interface for uploading and viewing videos
+- **Backend**: Express.js API handling file processing and cloud storage operations
+- **Storage**: Azure Blob Storage for reliable cloud-based video storage
+- **Containerization**: Docker containers for consistent deployment
+- **Orchestration**: Kubernetes for container management and scaling
 
 ## Table of Contents
 
-1. [Project Structure](#project-structure)
-2. [Backend Services](#backend-services)
-3. [Frontend Logic](#frontend-logic)
-4. [Running the Project Locally](#running-the-project-locally)
-5. [Deploying the Project on Kubernetes](#deploying-the-project-on-kubernetes)
-   - [Setting Up Azure Blob Storage](#1-setting-up-azure-blob-storage)
-   - [Create a Kubernetes Secret](#2-create-a-kubernetes-secret-for-environment-variables)
-   - [Enable Minikube Ingress Addon](#3-enable-minikube-ingress-addon)
-   - [Update the Hosts File](#4-update-the-hosts-file)
-   - [Apply Kubernetes Configuration Files](#5-apply-kubernetes-configuration-files)
-   - [Start Minikube Tunnel](#6-start-minikube-tunnel)
-   - [Access Your Application](#7-access-your-application)
-6. [Why Public Internet Deployment is Not Possible with Minikube](#why-public-internet-deployment-is-not-possible-with-minikube)
-7. [Docker Configuration](#docker-configuration)
-8. [Kubernetes Deployment Configuration](#kubernetes-deployment-configuration)
-9. [API Routing and Domain Configuration](#api-routing-and-domain-configuration)
-10. [Local Development vs. Kubernetes Deployment](#local-development-vs-kubernetes-deployment)
-11. [Conclusion](#conclusion)
-
----
-
-## Project Structure
-
-The project is divided into two main folders:
-
-1. **frontend**: Contains the React-based user interface.
-2. **backend**: Contains the Node.js-based backend services.
-
----
-
-## Backend Services
-
-The backend is built using Node.js and Express and manages video uploads, storage, and retrieval. Below is a detailed explanation of each component:
-
-### 1. `server.js`
-This is the entry point of the backend application. It:
-- Sets up the Express server
-- Configures middleware like CORS and body-parser
-- Connects routes and controllers
-- Initializes the server on a specified port
-
-```javascript
-const express = require('express');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const uploadRoutes = require('./routes/uploadRoutes');
-
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-app.use(cors());
-app.use(bodyParser.json());
-app.use('/api/upload', uploadRoutes);
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-```
-
-### 2. `services/azureBlobService.js`
-This service handles file storage in Azure Blob Storage:
-- Establishes connection with Azure using connection string
-- Creates container if it doesn't exist
-- Uploads files to the Azure Blob Storage
-- Generates URLs for uploaded files
-- Handles file deletion
-
-```javascript
-const { BlobServiceClient } = require('@azure/storage-blob');
-const { v4: uuidv4 } = require('uuid');
-
-class AzureBlobService {
-  constructor() {
-    this.connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-    this.containerName = process.env.AZURE_CONTAINER_NAME;
-    this.blobServiceClient = BlobServiceClient.fromConnectionString(this.connectionString);
-    this.containerClient = this.blobServiceClient.getContainerClient(this.containerName);
-  }
-
-  async uploadFile(file) {
-    const blobName = uuidv4() + '-' + file.originalname;
-    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
-    await blockBlobClient.upload(file.buffer, file.size);
-    return {
-      url: `${process.env.AZURE_BLOB_URL}/${this.containerName}/${blobName}`,
-      name: blobName
-    };
-  }
-
-  // Other methods for deletion, retrieval, etc.
-}
-
-module.exports = new AzureBlobService();
-```
-
-### 3. `controllers/uploadController.js`
-This controller manages the request/response cycle for file operations:
-- Processes incoming multipart form data
-- Calls the blob service to store files
-- Returns appropriate responses
-- Handles error scenarios
-
-```javascript
-const azureBlobService = require('../services/azureBlobService');
-const multer = require('multer');
-
-const upload = multer({ storage: multer.memoryStorage() });
-
-exports.uploadFile = [
-  upload.single('file'),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ message: 'No file uploaded' });
-      }
-      
-      const result = await azureBlobService.uploadFile(req.file);
-      return res.status(200).json(result);
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      return res.status(500).json({ message: 'Error uploading file', error: error.message });
-    }
-  }
-];
-
-// Other controller methods
-```
-
-### 4. `routes/uploadRoutes.js`
-This file defines the API endpoints:
-- Maps HTTP methods to controller functions
-- Sets up route paths
-- Groups related functionalities
-
-```javascript
-const express = require('express');
-const router = express.Router();
-const uploadController = require('../controllers/uploadController');
-
-router.post('/file', uploadController.uploadFile);
-router.get('/files', uploadController.getFiles);
-router.delete('/file/:id', uploadController.deleteFile);
-
-module.exports = router;
-```
-
-### 5. Environment Configuration
-The backend uses environment variables for configuration:
-- Database connection strings
-- Azure storage credentials
-- API keys and secrets
-- Application settings
-
-These are loaded from a `.env` file in development or from Kubernetes secrets in production.
-
----
-
-## Frontend Logic
-
-The frontend is built using React, providing a user-friendly interface for video management. Below are the key components and their functionality:
-
-### 1. `src/App.jsx`
-The main component that sets up routing and the overall application structure:
-
-```jsx
-import React from 'react';
-import { BrowserRouter as Router, Route, Switch } from 'react-router-dom';
-import Header from './components/Header';
-import VideoUpload from './components/VideoUpload';
-import VideoList from './components/VideoList';
-import VideoPlayer from './components/VideoPlayer';
-
-function App() {
-  return (
-    <Router>
-      <div className="app-container">
-        <Header />
-        <main className="content">
-          <Switch>
-            <Route exact path="/" component={VideoList} />
-            <Route path="/upload" component={VideoUpload} />
-            <Route path="/video/:id" component={VideoPlayer} />
-          </Switch>
-        </main>
-      </div>
-    </Router>
-  );
-}
-
-export default App;
-```
-
-### 2. `src/components/VideoUpload.jsx`
-Handles the video upload functionality:
-- Provides a file input for selecting videos
-- Validates file type and size
-- Shows upload progress
-- Communicates with the backend API
-- Displays success/error messages
-
-```jsx
-import React, { useState } from 'react';
-import axios from 'axios';
-import { useHistory } from 'react-router-dom';
-import './VideoUpload.css';
-
-function VideoUpload() {
-  const [file, setFile] = useState(null);
-  const [title, setTitle] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState('');
-  const history = useHistory();
-
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
-    if (selectedFile && selectedFile.type.includes('video/')) {
-      setFile(selectedFile);
-      setError('');
-    } else {
-      setFile(null);
-      setError('Please select a valid video file');
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!file) return;
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', title);
-    
-    setUploading(true);
-    
-    try {
-      await axios.post('http://localhost:5000/api/upload/file', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      setUploading(false);
-      history.push('/');
-    } catch (error) {
-      setUploading(false);
-      setError('Failed to upload video. Please try again.');
-      console.error(error);
-    }
-  };
-
-  return (
-    <div className="upload-container">
-      <h2>Upload Video</h2>
-      {error && <div className="error">{error}</div>}
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="title">Title</label>
-          <input
-            type="text"
-            id="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="video">Select Video</label>
-          <input
-            type="file"
-            id="video"
-            accept="video/*"
-            onChange={handleFileChange}
-            required
-          />
-        </div>
-        <button 
-          type="submit" 
-          disabled={uploading || !file}
-          className="upload-button"
-        >
-          {uploading ? 'Uploading...' : 'Upload Video'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-export default VideoUpload;
-```
-
-### 3. `src/components/VideoList.jsx`
-Displays a list of uploaded videos:
-- Fetches video data from the backend
-- Handles pagination
-- Provides options to play or delete videos
-
-```jsx
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import axios from 'axios';
-import './VideoList.css';
-
-function VideoList() {
-  const [videos, setVideos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    fetchVideos();
-  }, []);
-
-  const fetchVideos = async () => {
-    try {
-      const response = await axios.get('http://localhost:5000/api/upload/files');
-      setVideos(response.data);
-      setLoading(false);
-    } catch (error) {
-      setError('Failed to fetch videos');
-      setLoading(false);
-      console.error(error);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this video?')) {
-      try {
-        await axios.delete(`http://localhost:5000/api/upload/file/${id}`);
-        setVideos(videos.filter(video => video.id !== id));
-      } catch (error) {
-        setError('Failed to delete video');
-        console.error(error);
-      }
-    }
-  };
-
-  if (loading) return <div className="loading">Loading videos...</div>;
-  if (error) return <div className="error">{error}</div>;
-
-  return (
-    <div className="video-list">
-      <h2>Your Videos</h2>
-      {videos.length === 0 ? (
-        <p>No videos yet. <Link to="/upload">Upload one now!</Link></p>
-      ) : (
-        <div className="video-grid">
-          {videos.map(video => (
-            <div key={video.id} className="video-card">
-              <div className="thumbnail">
-                <img src={video.thumbnailUrl || '/placeholder.jpg'} alt={video.title} />
-              </div>
-              <div className="video-info">
-                <h3>{video.title}</h3>
-                <div className="video-actions">
-                  <Link to={`/video/${video.id}`} className="play-button">
-                    Play
-                  </Link>
-                  <button 
-                    onClick={() => handleDelete(video.id)}
-                    className="delete-button"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default VideoList;
-```
-
-### 4. `src/components/VideoPlayer.jsx`
-Handles video playback:
-- Fetches specific video details
-- Renders the video player
-- Implements playback controls
-- Tracks viewing statistics
-
----
+- [Running the Project Locally](#running-the-project-locally)
+- [Deploying the Project on Kubernetes](#deploying-the-project-on-kubernetes)
+  - [Setting Up Azure Blob Storage](#1-setting-up-azure-blob-storage)
+  - [Create a Kubernetes Secret](#2-create-a-kubernetes-secret-for-environment-variables)
+  - [Enable Minikube Ingress Addon](#3-enable-minikube-ingress-addon)
+  - [Update the Hosts File](#4-update-the-hosts-file)
+  - [Apply Kubernetes Configuration Files](#5-apply-kubernetes-configuration-files)
+  - [Start Minikube Tunnel](#6-start-minikube-tunnel)
+  - [Access Your Application](#7-access-your-application)
+- [Why Public Internet Deployment is Not Possible with Minikube](#why-public-internet-deployment-is-not-possible-with-minikube)
+- [Docker Configuration](#docker-configuration)
+  - [Backend Dockerfile](#backend-dockerfile)
+  - [Frontend Dockerfile](#frontend-dockerfile)
+- [Kubernetes Deployment Configuration](#kubernetes-deployment-configuration)
+  - [Backend Deployment](#backend-deployment)
+  - [Frontend Deployment](#frontend-deployment)
+  - [Ingress Configuration](#ingress-configuration)
+- [API Routing and Domain Configuration](#api-routing-and-domain-configuration)
+  - [How API Routes Are Accessed](#how-api-routes-are-accessed)
+  - [Benefits of This Approach](#benefits-of-this-approach)
+- [Local Development vs. Kubernetes Deployment](#local-development-vs-kubernetes-deployment)
+  - [Running Locally (Original Configuration)](#running-locally-original-configuration)
+  - [Kubernetes Deployment (Current Configuration)](#kubernetes-deployment-current-configuration)
 
 ## Running the Project Locally
 
-To run the project locally without Docker or Kubernetes, use the code referenced in the `//original comment` throughout the codebase. To run the project locally:
+To run the project locally without Docker or Kubernetes, use the code referenced in the comment `//original` throughout the codebase. To run the project locally:
 
 1. **Backend Configuration**:
-   - The backend API endpoints expect direct calls to `http://localhost:5000/api/...`
+   - The backend API endpoints expect direct calls to `http://localhost:4000/api/...`
    - Environment variables are loaded from a local `.env` file
-   - The server listens on port 5000
+   - The server listens on port 4000
 
 2. **Frontend Configuration**:
-   - API calls are directed to `http://localhost:5000/api/...`
-   - The development server runs on port 3000
+   - API calls are directed to `http://localhost:4000/api/...`
+   - The development server runs on port 5173
    - React's development environment provides hot-reloading
 
 3. **Why the Current Code Can't Run Locally Without Modifications**:
-   - The code has been modified to work with Docker images and Kubernetes
+   - The code has been modified to work as Docker images and Kubernetes
    - API endpoints in the frontend code might be pointing to Kubernetes service names
    - The backend expects environment variables from Kubernetes secrets
    - Port configurations may have changed to accommodate container standards
 
 4. **How to Revert to Local Development**:
-   - Look for comments labeled `//original comment` in the code
+   - Look for comments labeled `//original` in the code
    - Restore the original endpoint URLs in the frontend API calls
    - Set up a local `.env` file with the necessary Azure credentials
-   - Use `npm start` for both frontend and backend instead of building Docker images
 
 ---
 
@@ -656,7 +311,7 @@ CMD ["node", "src/index.js"]
 # Build stage
 FROM node:20 AS builder
 WORKDIR /app
-COPY . .
+COPY . . 
 RUN npm install
 RUN npm run build
 
@@ -841,7 +496,6 @@ The application architecture uses a combination of the Ingress controller, host 
    - Based on the Ingress rules, it determines where to route the request:
      - Requests to the root path `/` are sent to the frontend service.
      - Requests to paths starting with `/api/` are sent to the backend service.
-   - For API requests, the Ingress controller's rewrite rules (using the annotation `nginx.ingress.kubernetes.io/rewrite-target: /$1`) strip the `/api/` prefix before forwarding to the backend service. This means a request to `/api/upload/files` is rewritten to `/upload/files` when it reaches the backend.
 
 3. **Service Resolution**:
    - The Kubernetes service discovery system directs the traffic to the appropriate pods.
@@ -876,16 +530,16 @@ The project was originally designed to run on localhost, then later modified for
 
 ### Running Locally (Original Configuration)
 
-The project can be run locally without Docker or Kubernetes by using the code referenced in the `//original comment` throughout the codebase. To run the project locally:
+The project can be run locally without Docker or Kubernetes by using the code referenced in the `//original` throughout the codebase. To run the project locally:
 
 1. **Backend Configuration**:
-   - The backend API endpoints expect direct calls to `http://localhost:5000/api/...`
+   - The backend API endpoints expect direct calls to `http://localhost:4000/api/...`
    - Environment variables are loaded from a local `.env` file
-   - The server listens on port 5000
+   - The server listens on port 4000
 
 2. **Frontend Configuration**:
-   - API calls are directed to `http://localhost:5000/api/...`
-   - The development server runs on port 3000
+   - API calls are directed to `http://localhost:4000/api/...`
+   - The development server runs on port 5173
    - React's development environment provides hot-reloading
 
 3. **Why the Current Code Can't Run Locally Without Modifications**:
@@ -895,10 +549,9 @@ The project can be run locally without Docker or Kubernetes by using the code re
    - Port configurations may have changed to accommodate container standards
 
 4. **How to Revert to Local Development**:
-   - Look for comments labeled `//original comment` in the code
+   - Look for comments labeled `//original` in the code
    - Restore the original endpoint URLs in the frontend API calls
    - Set up a local `.env` file with the necessary Azure credentials
-   - Use `npm start` for both frontend and backend instead of building Docker images
 
 ### Kubernetes Deployment (Current Configuration)
 
@@ -919,10 +572,3 @@ The current setup is optimized for running in a Kubernetes environment:
    - Network policies are defined by Kubernetes resources
    - The entire application stack is orchestrated by Kubernetes
 
-This dual configuration approach allows the application to be developed locally for rapid iteration, then deployed to Kubernetes for a more production-like environment.
-
-## Conclusion
-
-This project demonstrates a complete video management application with a React frontend and Node.js backend, along with deployment options for both local development and Kubernetes. The application showcases modern web development practices, cloud storage integration, and containerized deployment workflows.
-
-By following the steps outlined above, you can run the application locally or deploy it on a local Kubernetes cluster using `minikube`. For production deployments, consider using a managed Kubernetes service like AKS, GKE, or EKS to ensure reliability, security, and scalability.
